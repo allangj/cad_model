@@ -1,0 +1,5 @@
+Basic repo with some personal CAD utilities 
+
+FreeCAD macros:
+* Cycloid.FCMacro: Basic Macro to create a cycloid base on input user data
+  (In process to create a cycloidal gear drive)

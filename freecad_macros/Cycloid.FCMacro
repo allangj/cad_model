@@ -1,0 +1,115 @@
+from math import sin, cos, atan, pi
+import FreeCAD as App
+import Part
+import Sketcher
+import Draft
+from PySide.QtGui import QInputDialog
+
+# Logic to create the cycloid is  taking from different sources like:
+# https://stepbystep-robotics.com/hp/robots/cycloidal-drive/
+# https://uwaterloo.atlassian.net/wiki/spaces/UWRT/pages/33962263427/Cycloidal+Drive+-+Rev+1+Prototype+Journal
+# https://blogs.solidworks.com/teacher/wp-content/uploads/sites/3/Building-a-Cycloidal-Drive-with-SOLIDWORKS.pdf
+# This is helpful to get the equations and ahave a common nameing of the parts
+
+# Global data override by user input
+global_params = {
+    'base_radius' : 31.0,
+    'fixed_rings' :30,
+    'fixed_ring_radius' : 3.0,
+    'excentricity' : 0.5,
+    'steps' : 500,
+    'disk_width' : 10}
+ 
+def showParams():
+    """
+    Print to console the parameters that will be used
+    """
+    for key, value in global_params.items():
+        print(key, value)
+
+# From here we start parametric shapes that uses the global params as properties
+
+class cycloidDisk:
+    """
+    Cycloidal disk class, this is the rotor of cycloidal shape
+    """
+    def __init__(self, obj):
+        obj.Proxy = self
+        obj.addProperty('App::PropertyFloat', 'base_radius', 'cycloidDisk', 'Base circle radius').base_radius = global_params['base_radius']
+        obj.addProperty('App::PropertyInteger', 'fixed_rings', 'cycloidDisk', 'Number of fixed rings').fixed_rings = global_params['fixed_rings']
+        obj.addProperty('App::PropertyFloat', 'fixed_ring_radius', 'cycloidDisk', 'Radius of the fixed rings').fixed_ring_radius = global_params['fixed_ring_radius']
+        obj.addProperty('App::PropertyFloat', 'excentricity', 'cycloidDisk', 'Excentricity to use in the shaft').excentricity = global_params['excentricity']
+        obj.addProperty('App::PropertyInteger', 'steps', 'cycloidDisk', 'Number fo steps for point calculation').steps = global_params['steps']
+        obj.addProperty('App::PropertyFloat', 'disk_width', 'cycloidDisk', 'Cycloid disk width').disk_width = global_params['disk_width']
+
+    def psi(self, obj, theta):
+        """
+        General equation for Psi, taken from: 
+        https://blogs.solidworks.com/teacher/wp-content/uploads/sites/3/Building-a-Cycloidal-Drive-with-SOLIDWORKS.pdf
+        """
+        return atan(sin((obj.fixed_rings - 1)*theta) / ((obj.base_radius/(obj.excentricity * obj.fixed_rings)) - cos((obj.fixed_rings - 1)*theta)))
+    
+    def x(self, obj, theta):
+        """
+        General equation for X point, taken from: 
+        """
+        psi = self.psi(obj, theta)
+        return (obj.base_radius * cos(theta)) - (obj.fixed_ring_radius * cos(theta - psi)) - (obj.excentricity * cos(obj.fixed_rings * theta))
+    
+    def y(self, obj, theta):
+        """
+        General equation for Y point, taken from: 
+        """
+        psi = self.psi(obj, theta)
+        return -(obj.base_radius * sin(theta)) + (obj.fixed_ring_radius * sin(theta - psi)) + (obj.excentricity * sin(obj.fixed_rings * theta))
+
+    def pointsGen(self, obj):
+        """
+        Return a list of vectors for each generated point in space
+        """
+        # Generate the number of angles to use base on steps
+        curve = []
+        thetaList = [j / obj.steps * 2 * pi for j in range(obj.steps + 1)]
+        for theta in thetaList:
+            x = self.x(obj, theta)
+            y = self.y(obj, theta)
+            curve.append(App.Vector(x, y, 0))
+ 
+        return curve
+
+    def execute(self, obj):
+        curve = self.pointsGen(obj)
+        edges= []
+        # Create the  edges
+        for j in range(len(curve) - 1):
+            edges.append(Part.LineSegment(curve[j], curve[j+1]).toShape())
+
+        # Create the wire from the list of edges
+        wire = Part.Wire(edges)
+        # Create a face
+        face = Part.Face(wire)
+        # TODO: should we create the holes here?
+        # Extrude the disk
+        cpart = face.extrude(FreeCAD.Vector(0,0,obj.disk_width))
+        obj.Shape = cpart
+
+
+if __name__ == "__main__": #feature will be generated after macro execution
+    # Main of the Macro
+    # Get user input, cancel turns to default
+    input_data = {}
+    input_data['base_radius'] = QInputDialog.getDouble(None, 'Cycloid', 'Base radius of the cycloid (mm)', global_params['base_radius'])
+    input_data['fixed_rings'] = QInputDialog.getInt(None, 'Cycloid', 'Number of fixed ring pins', global_params['fixed_rings'])
+    input_data['fixed_ring_radius'] = QInputDialog.getDouble(None, 'Cycloid', 'Radius of fixed ring pins (mm)', global_params['fixed_ring_radius'])
+    input_data['excentricity'] = QInputDialog.getDouble(None, 'Cycloid', 'Excentricity (mm)', global_params['excentricity'])
+    input_data['disk_width'] = QInputDialog.getDouble(None, 'Cycloid', 'Cycloid disk width (mm)', global_params['disk_width'])
+    # Override global params
+    for key in input_data:
+        if input_data[key][1] == True:
+            global_params[key] = input_data[key][0]
+
+    # Create cycloid disk 1
+    cycloidDiskObj = App.ActiveDocument.addObject("Part::FeaturePython", "cycloidDisk")
+    cycloidDisk1 = cycloidDisk(cycloidDiskObj)
+    cycloidDiskObj.ViewObject.Proxy = 0
+    App.ActiveDocument.recompute()
